@@ -1,8 +1,10 @@
 #pragma once
 #include <pthread.h>
+#include <stdatomic.h>
 #include "item_ops.h"
 #include "log.h"
 
+struct item_ops;
 struct queue;
 typedef struct queue queue_t;
 typedef enum {
@@ -18,9 +20,25 @@ typedef void (*queue_monitor)(
         queue_event_t event,
         uint64_t duration_ns);
 
+typedef struct queue_track {
+    uint64_t start_ts;     /* 出发时间 */
+    uint64_t start_qid;    /* 出发 queue */
+    int      valid;        /* 是否在计时中 */
+} queue_track_t;
+
+typedef void (*queue_item_monitor)(
+        void *ctx,
+        queue_t *q,
+        void *item,
+        uint64_t duration_ns);
+
+#define ITEM_TRACK(item) \
+    ((queue_track_t *)((char *)(item) - sizeof(queue_track_t)))
+
 typedef struct queue {
-    char           name[50];
-    void          **ring;
+    uint64_t        id;
+    char            name[50];
+    void            **ring;
     int             capacity;
     int             head;
     int             tail;
@@ -37,18 +55,17 @@ typedef struct queue {
 
     int     stopped;
 
-    const item_ops_t *item_ops;
+    const struct item_ops *item_ops;
 
     /* monitor */
     queue_monitor monitor;
     void *monitor_ctx;
     uint64_t full_enter_ts;
     uint64_t empty_enter_ts;
-
 } queue_t;
 
 /* lifecycle */
-int  queue_init(queue_t *q, const char *name, int capacity, const item_ops_t *item_ops);
+int  queue_init(queue_t *q, const char *name, int capacity, const struct item_ops *item_ops);
 void queue_deinit(queue_t *q);
 
 /* ops */

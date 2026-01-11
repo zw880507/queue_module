@@ -22,7 +22,7 @@ int sync_policy_window_decide(
         int i = active_idxs[k];
         void *item = m->inputs[i].item;
 
-        uint64_t ts = m->item_ops->get_timestamp_ns(item);
+        uint64_t ts = m->item_ops->get_timestamp_ns(item, m->item_ops->ctx);
 
         if (k == 0 || ts < min_ts) {
             min_ts = ts;

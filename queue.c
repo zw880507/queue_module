@@ -8,6 +8,8 @@ int queue_init(queue_t *q, const char *name, int capacity, const item_ops_t *ite
     q->ring = calloc(capacity, sizeof(void *));
     if (!q->ring) return -1;
 
+    q->id = get_next_queue_id();
+
     q->capacity = capacity;
     q->head = q->tail = q->count = 0;
     q->stopped = 0;
@@ -45,7 +47,6 @@ int queue_push(queue_t *q, void *item)
 {
     pthread_mutex_lock(&q->lock);
 
-
     if (q->count == q->capacity && q->full_enter_ts == 0) {
         q->full_enter_ts = now_ns();
         if (q->monitor)
@@ -73,6 +74,13 @@ int queue_push(queue_t *q, void *item)
     q->ring[q->tail] = item;
     q->tail = (q->tail + 1) % q->capacity;
     q->count++;
+
+    if (q->item_ops && q->item_ops->get_track) {
+        item_track_t *item_track = q->item_ops->get_track(item, q->item_ops->ctx);
+        if (item_track) {
+            item_track_on_push(item, q, item);
+        }
+    }
 
     pthread_cond_signal(&q->not_empty);
 
@@ -103,6 +111,7 @@ void *queue_pop(queue_t *q)
         return NULL;
     }
 
+
     if (q->empty_enter_ts > 0) {
         uint64_t dt = now_ns() - q->empty_enter_ts;
         q->empty_enter_ts = 0;
@@ -114,6 +123,14 @@ void *queue_pop(queue_t *q)
     void *item = q->ring[q->head];
     q->head = (q->head + 1) % q->capacity;
     q->count--;
+
+
+    if (q->item_ops && q->item_ops->get_track) {
+        item_track_t *item_track1 = q->item_ops->get_track(NULL, NULL);
+        item_track_t *item_track = q->item_ops->get_track(item, q->item_ops->ctx);
+        if (item_track)
+            item_track_on_pop(item, q, item);
+    }
 
     pthread_cond_signal(&q->not_full);
     pthread_mutex_unlock(&q->lock);
@@ -219,3 +236,4 @@ void queue_set_monitor(queue_t *q,
     q->monitor = cb;
     q->monitor_ctx = ctx;
 }
+

@@ -19,11 +19,17 @@ static void buffer_free(void *item, void *ctx) {
     free(b);
 }
 
+static item_track_t *buffer_get_track(void *item)
+{
+return NULL;
+}
+
 //static 
 const item_ops_t buffer_item_ops = {
     .get_timestamp_ns = buffer_get_ts,
     .alloc = buffer_alloc,
     .free = buffer_free,
+    .get_track = buffer_get_track,
     .ctx = NULL,
 };
 

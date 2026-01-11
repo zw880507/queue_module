@@ -12,11 +12,14 @@
 #include "group_item_ops.h"
 #include "context.h"
 #include "utils.h"
+#include "tracked_item.h"
 
 /* ================= 配置 ================= */
 
-#define N       50
-#define QUEUE_CAP   2000
+#define N       10
+#define QUEUE_CAP   1000
+
+#define QUEUE_COUNT 3
 
 extern const sync_policy_t sync_policy_window;
 
@@ -35,7 +38,7 @@ static int demo_fill(buffer_t *item, void *ctx)
     LOG("[source %d] fill item %p ts=%lu",
         c->id, b, b->timestamp);
 
-    usleep(400); /* simulate sensor */
+//    usleep(400); /* simulate sensor */
     return 0;
 }
 
@@ -50,7 +53,10 @@ static void demo_process(item_group_t *item_group,
     LOG("[process] group cnt=%d", item_group->count);
 
     for (int i = 0; i < item_group->count; i++) {
-        buffer_t *b = item_group->items[i];
+
+//        buffer_t *b = item_group->items[i];
+        tracked_item_t *t = item_group->items[i];
+        buffer_t *b = t->user_item;
 //        LOG("  buffer[%d]", item_group->idxs[i]);
         LOG("[process] item:%p, ts=%lu",b, b->timestamp);
     }
@@ -83,6 +89,16 @@ static void _queue_monitor(void *ctx,
     }
 }
 
+static void item_latency_cb(
+        void *ctx,
+        queue_t *q,
+        void *item,
+        uint64_t ns)
+{
+    LOG("[queue %s] item %p latency %lu us",
+        q->name, item, ns / 1000);
+}
+
 /* ================= main ================= */
 
 int main(void)
@@ -96,19 +112,25 @@ int main(void)
     queue_t *empty_qs[N];
     queue_t *fill_qs[N];
 
+    item_ops_t tracked_item_ops; 
+    item_track_ops_init(&tracked_item_ops, &buffer_item_ops);
+
     for (int i = 0; i < N; i++) {
         char empty_name[50];
         sprintf(empty_name, "empty_queue-%d", i);
         char fill_name[50];
         sprintf(fill_name, "fill_queue-%d", i);
+
+
         queue_init(&empty_q[i],
                    empty_name,
-                   QUEUE_CAP * 3 /* empty,fill,sync_out ,total 3 queues */,
-                   &buffer_item_ops);   /* ⭐ item 实现 */
+                   QUEUE_CAP * QUEUE_COUNT /* empty,fill,sync_out ,total 3 queues */,
+                   &tracked_item_ops);
         queue_init(&fill_q[i],
                    fill_name,
                    QUEUE_CAP,
-                   &buffer_item_ops);   /* ⭐ item 实现 */
+                   &tracked_item_ops);
+//                   &buffer_item_ops);
 
         queue_set_monitor(&empty_q[i], _queue_monitor, NULL);
         queue_set_monitor(&fill_q[i], _queue_monitor, NULL);
@@ -116,9 +138,9 @@ int main(void)
         empty_qs[i] = &empty_q[i];
         fill_qs[i] = &fill_q[i];
 
-        for (int j = 0; j < QUEUE_CAP * 3 /* empty,fill,sync_out ,total 3 queues */; j++) {
-            buffer_t *b = queue_alloc_item(&empty_q[i]);
-            queue_push(&empty_q[i], b);
+        for (int j = 0; j < QUEUE_CAP * QUEUE_COUNT /* empty,fill,sync_out ,total 3 queues */; j++) {
+            void *item = queue_alloc_item(&empty_q[i]);
+            queue_push(&empty_q[i], item);
         }
 
     }
@@ -161,11 +183,12 @@ int main(void)
                      &sync_out_q,
                      empty_qs,
                      &sync_policy_window,
-                     &buffer_item_ops,
+                     &tracked_item_ops,
                      &group_item_ops,
                      10000000);
 
     sync_module_start(&sync);
+
 
     /* ---------- process ---------- */
 
