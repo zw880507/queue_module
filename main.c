@@ -13,11 +13,12 @@
 #include "context.h"
 #include "utils.h"
 #include "tracked_item.h"
+#include "queue_module.h"
 
 /* ================= 配置 ================= */
 
-#define N       10
-#define QUEUE_CAP   1000
+#define N           4
+#define QUEUE_CAP   10
 
 #define QUEUE_COUNT 3
 
@@ -99,6 +100,30 @@ static void item_latency_cb(
         q->name, item, ns / 1000);
 }
 
+static int module1_process(void *item, void *ctx)
+{
+//    test_item_t *it = item;
+//    it->value += 1;
+    LOG("%s:%d", __func__, __LINE__);
+    return 0;
+}
+
+static int module2_process(void *item, void *ctx)
+{
+//    test_item_t *it = item;
+//    it->value += 1;
+    LOG("%s:%d", __func__, __LINE__);
+    return 0;
+}
+static int module3_process(void *item, void *ctx)
+{
+//    test_item_t *it = item;
+//    it->value += 1;
+    LOG("%s:%d", __func__, __LINE__);
+    return 0;
+}
+
+
 /* ================= main ================= */
 
 int main(void)
@@ -112,6 +137,9 @@ int main(void)
     queue_t *empty_qs[N];
     queue_t *fill_qs[N];
 
+    queue_t process_q[N];
+    queue_t *process_qs[N];
+
     item_ops_t tracked_item_ops; 
     item_track_ops_init(&tracked_item_ops, &buffer_item_ops);
 
@@ -120,6 +148,10 @@ int main(void)
         sprintf(empty_name, "empty_queue-%d", i);
         char fill_name[50];
         sprintf(fill_name, "fill_queue-%d", i);
+
+        char process_name[50];
+        sprintf(process_name, "process_queue-%d", i);
+
 
 
         queue_init(&empty_q[i],
@@ -132,11 +164,18 @@ int main(void)
                    &tracked_item_ops);
 //                   &buffer_item_ops);
 
+        queue_init(&process_q[i],
+                   process_name,
+                   QUEUE_CAP,
+                   &tracked_item_ops);
+
+
         queue_set_monitor(&empty_q[i], _queue_monitor, NULL);
         queue_set_monitor(&fill_q[i], _queue_monitor, NULL);
 
         empty_qs[i] = &empty_q[i];
         fill_qs[i] = &fill_q[i];
+        process_qs[i] = &process_q[i];
 
         for (int j = 0; j < QUEUE_CAP * QUEUE_COUNT /* empty,fill,sync_out ,total 3 queues */; j++) {
             void *item = queue_alloc_item(&empty_q[i]);
@@ -144,6 +183,67 @@ int main(void)
         }
 
     }
+
+    queue_module_t module1, module2, module3;
+    queue_module_init(&module1 /* queue_module_t */,
+                      "module1" /* name */,
+                      &empty_qs /* in queues */,
+                      N /* in queues count */,
+                      &fill_qs /* out queues */,
+                      N /* out queues count */,
+                      &empty_qs /* recycle queues */,
+                      N /* recycle queue count */,
+                      &tracked_item_ops /* item_ops */,
+                      &default_queue_ops /* queue_ops */,
+                      &default_process_ops /* process_ops */,
+                      N /* thread count */,
+                      -1 /* thread priority */,
+                      "m1_thread" /* thread name */,
+                      NULL /* ctx */);
+
+    queue_module_start(&module1);
+
+
+    queue_module_init(&module2 /* queue_module_t */,
+                      "module2" /* name */,
+                      &fill_qs /* in queues */,
+                      N /* in queues count */,
+                      &process_qs /* out queues */,
+                      N /* out queues count */,
+                      &empty_qs /* recycle queues */,
+                      N /* recycle queue count */,
+                      &tracked_item_ops /* item_ops */,
+                      &default_queue_ops /* queue_ops */,
+                      &default_process_ops /* process_ops */,
+                      N /* thread count */,
+                      -1 /* thread priority */,
+                      "m2_thread" /* thread name */,
+                      NULL /* ctx */);
+
+    queue_module_start(&module2);
+
+
+    queue_module_init(&module3 /* queue_module_t */,
+                      "module3" /* name */,
+                      &process_qs /* in queues */,
+                      N /* in queues count */,
+                      &empty_qs /* out queues */,
+                      N /* out queues count */,
+                      &empty_qs /* recycle queues */,
+                      N /* recycle queue count */,
+                      &tracked_item_ops /* item_ops */,
+                      &default_queue_ops /* queue_ops */,
+                      &default_process_ops /* process_ops */,
+                      N /* thread count */,
+                      -1 /* thread priority */,
+                      "m3_thread" /* thread name */,
+                      NULL /* ctx */);
+
+    queue_module_start(&module3);
+
+
+while (1)
+    sleep(1);
 
     /* ---------- source ---------- */
 

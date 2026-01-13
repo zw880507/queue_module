@@ -45,6 +45,7 @@ void queue_deinit(queue_t *q)
 
 int queue_push(queue_t *q, void *item)
 {
+
     pthread_mutex_lock(&q->lock);
 
     if (q->count == q->capacity && q->full_enter_ts == 0) {
@@ -56,7 +57,6 @@ int queue_push(queue_t *q, void *item)
 
     while (q->count == q->capacity && !q->stopped)
         pthread_cond_wait(&q->not_full, &q->lock);
-
 
     if (q->full_enter_ts > 0) {
         uint64_t dt = now_ns() - q->full_enter_ts;

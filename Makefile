@@ -13,7 +13,10 @@ SRCS := \
 	sync_module.c \
 	sync_policy_window.c \
         item_track_ops.c \
-        item_track.c
+        item_track.c \
+        queue_module.c \
+        queue_ops.c \
+        process_ops.c
 
 OBJS := $(SRCS:.c=.o)
 
