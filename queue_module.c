@@ -4,94 +4,192 @@
 #include <stdio.h>
 #include "log.h"
 
-static void queue_module_run(queue_module_t *m,
-                                  queue_thread_map_t *map)
+int pop_multi_with_timeout(queue_module_t *m,
+                           queue_thread_map_t *map,
+                           uint64_t timeout_ns,
+                           void **items,            /* size = n */
+                           int *popped_midxs,       /* size = n */
+                           int *popped_cnt,
+                           int *missed_midxs,       /* size = n */
+                           int *missed_cnt)
 {
-
     int n = map->qcount;
-    if (n <= 0)
-        return;
+    uint64_t deadline = now_ns() + timeout_ns;
 
-    if (!m->process_ops)
-        return;
+    int got[n];
+    memset(got, 0, sizeof(got));
 
-    void *items[n * 2];
-    int   item_cnt = 0;
+    *popped_cnt = 0;
+    *missed_cnt = 0;
 
-    int   out_qidxs[n * 2];
+    /* 初始化 items */
+    for (int i = 0; i < n; ++i)
+        items[i] = NULL;
 
-    if (m->process_ops->sync) {
-        if (m->process_ops->sync(m->in_qs,
-                                 m->recycle_qs,
-                                 m->queue_ops,
-                                 map->qidxs,
-                                 map->qcount,
-                                 items,
-                                 out_qidxs,
-                                 &item_cnt,
-                                 m->ctx) != 0) {
+    while (now_ns() < deadline) {
 
-            if (m->process_ops->done) {
-                m->process_ops->done(m->ctx, PROCESS_SYNC_ERROR);
-            }
-
-            return;
-        } else if (item_cnt != n) {
-            //TODO need recycle here ?
-            for (int i = 0; i < item_cnt; ++i) {
-                m->queue_ops->recycle_item(m->recycle_qs[out_qidxs[i]], items[i]);
-            }
-
-            if (m->process_ops->done) {
-                m->process_ops->done(m->ctx, PROCESS_SYNC_ERROR);
-            }
-
-            return;
-        } else {
-            //sync OK
-        }
-    } else {
         for (int i = 0; i < n; ++i) {
-            int qi = map->qidxs[i];
-            items[i] = m->queue_ops->pop(m->in_qs[qi]);
-            if (!items[i]) {
-                if (m->process_ops->done) {
-                    m->process_ops->done(m->ctx, PROCESS_POP_ERROR);
-                }
+            if (got[i])
+                continue;
 
-                return;
+            int qi = map->qidxs[i];
+            if (!m->queue_ops->try_pop(m->in_qs[qi], &items[i])) {
+//                items[i] = item;
+                got[i]   = 1;
+                popped_midxs[(*popped_cnt)++] = i;
             }
-            out_qidxs[i] = qi;
         }
-        item_cnt = n;
+
+        /* 已经全部 pop 到 */
+        if (*popped_cnt == n)
+            break;
+
+        /* 防止 busy loop */
+        struct timespec ts = {
+            .tv_sec  = 0,
+            .tv_nsec = 1000000, /* 1ms */
+        };
+        nanosleep(&ts, NULL);
     }
+
+    /* 统计 missed */
+    for (int i = 0; i < n; ++i) {
+        if (!got[i])
+            missed_midxs[(*missed_cnt)++] = i;
+    }
+
+    if (*popped_cnt == 0)
+        return POP_MULTI_TIMEOUT;
+
+    return POP_MULTI_OK;
+}
+
+static void queue_module_run(queue_module_t *m,
+                             queue_thread_map_t *map)
+{
+    int n = map->qcount;
+    if (n <= 0 || !m->process_ops)
+        return;
+
+    uint64_t pop_timeout_ns = 0;
+    if (m->process_ops->pop_timeout_ns)
+        m->process_ops->pop_timeout_ns(m->ctx, &pop_timeout_ns);
+    void *items[n];
+    int popped_midxs[n], missed_midxs[n];
+    int popped_cnt = 0, missed_cnt = 0;
+
+    int ret = pop_multi_with_timeout(
+                  m,
+                  map,
+                  pop_timeout_ns,
+                  items,
+                  popped_midxs,
+                  &popped_cnt,
+                  missed_midxs,
+                  &missed_cnt);
+
+    if (ret == POP_MULTI_TIMEOUT) {
+        if (m->process_ops->done)
+            m->process_ops->done(m->ctx, PROCESS_POP_TIMEOUT);
+        return;
+    }
+
+    /* -------- pick 阶段 -------- */
+
+    int picked_midxs[n];
+    int drop_midxs[n];
+    int requeue_midxs[n];
+    int picked_cnt  = 0;
+    int drop_cnt    = 0;
+    int requeue_cnt = 0;
+
+    pick_result_t pick_ret = PICK_OK;
+
+    if (m->process_ops->pick) {
+        pick_ret = m->process_ops->pick(
+                        items,
+                        n,
+                        picked_midxs,  &picked_cnt,
+                        drop_midxs,    &drop_cnt,
+                        requeue_midxs, &requeue_cnt,
+                        m->ctx);
+    } else {
+        /* 默认 pick：所有已 pop 的 */
+        for (int i = 0; i < popped_cnt; ++i)
+            picked_midxs[i] = popped_midxs[i];
+        picked_cnt = popped_cnt;
+    }
+
+    /* -------- drop -------- */
+    for (int i = 0; i < drop_cnt; ++i) {
+        int midx = drop_midxs[i];
+        if (!items[midx])
+            continue;
+
+        int qi = map->qidxs[midx];
+        m->queue_ops->recycle_item(m->recycle_qs[qi], items[midx]);
+        items[midx] = NULL;
+    }
+
+    /* -------- requeue (必须 front) -------- */
+    for (int i = 0; i < requeue_cnt; ++i) {
+        int midx = requeue_midxs[i];
+        if (!items[midx])
+            continue;
+
+        int qi = map->qidxs[midx];
+        m->queue_ops->push_front(m->in_qs[qi], items[midx]);
+        items[midx] = NULL;
+    }
+
+    if (pick_ret != PICK_OK || picked_cnt == 0) {
+        if (m->process_ops->done)
+            m->process_ops->done(m->ctx, PROCESS_PICK_SKIP);
+        return;
+    }
+
+    /* -------- process -------- */
 
     int handled = 0;
     if (m->process_ops->process) {
-        handled = m->process_ops->process(items, item_cnt, m->ctx);
+        handled = m->process_ops->process(
+                      items,
+                      picked_midxs,
+                      picked_cnt,
+                      m->ctx);
     }
 
     if (handled) {
-        for (int i = 0; i < item_cnt; ++i) {
-            m->queue_ops->recycle_item(m->recycle_qs[out_qidxs[i]], items[i]);
+        /* process 失败 → recycle */
+        for (int i = 0; i < picked_cnt; ++i) {
+            int midx = picked_midxs[i];
+            if (!items[midx])
+                continue;
+
+            int qi = map->qidxs[midx];
+            m->queue_ops->recycle_item(m->recycle_qs[qi], items[midx]);
+            items[midx] = NULL;
         }
 
-        if (m->process_ops->done) {
+        if (m->process_ops->done)
             m->process_ops->done(m->ctx, PROCESS_PROC_ERROR);
-        }
-
-        return;
-
     } else {
-        for (int i = 0; i < item_cnt; ++i) {
-            m->queue_ops->push(m->out_qs[out_qidxs[i]], items[i]);
-        }
-    }
+        /* 正常 forward */
+        for (int i = 0; i < picked_cnt; ++i) {
+            int midx = picked_midxs[i];
+            if (!items[midx])
+                continue;
 
-    if (m->process_ops->done) {
-        m->process_ops->done(m->ctx, PROCESS_NO_ERROR);
+            int qi = map->qidxs[midx];
+            m->queue_ops->push(m->out_qs[qi], items[midx]);
+            items[midx] = NULL;
+        }
+
+        if (m->process_ops->done)
+            m->process_ops->done(m->ctx, PROCESS_NO_ERROR);
     }
 }
+
 
 static void *queue_module_thread(void *arg)
 {
@@ -100,9 +198,6 @@ static void *queue_module_thread(void *arg)
     int tid = tctx->tid;
 
     queue_thread_map_t *map = &m->thread_maps[tid];
-//    char tname[16];
-//    snprintf(tname, sizeof(tname), "%s-%d",m->request_thread_name, tid);
-//    pthread_setname_np(pthread_self(), tname);
 
     while (m->running) {
         queue_module_run(m, map);
@@ -124,6 +219,7 @@ static int queue_module_balance(queue_module_t *m,
     if (!m->thread_maps)
         return -1;
 
+#if 0
     /* ========== SYNC Mode ========== */
     if (m->process_ops && m->process_ops->sync) {
 
@@ -138,6 +234,7 @@ static int queue_module_balance(queue_module_t *m,
         *real_thread_count = 1;
         return 0;
     }
+#endif
 
     /* ========== STREAM Mode ========== */
     int used_threads = (Q < T) ? Q : T;
@@ -303,15 +400,12 @@ int queue_module_stop(queue_module_t *m)
 
     m->running = 0;
 
-    /* 唤醒所有可能在 pop 上阻塞的线程 */
     for (int i = 0; i < m->inq_count; ++i)
         m->queue_ops->wakeup(m->in_qs[i]);
 
-    /* 等待所有线程退出 */
     for (int i = 0; i < m->real_thread_count; ++i)
         pthread_join(m->threads[i], NULL);
 
-    /* 清理 thread_maps 中分配的 qidxs */
     if (m->thread_maps) {
         for (int i = 0; i < m->real_thread_count; ++i)
             free(m->thread_maps[i].qidxs);
@@ -322,8 +416,6 @@ int queue_module_stop(queue_module_t *m)
     free(m->threads);
     m->threads = NULL;
 
-//    free(m->thread_ids);
-//    m->thread_ids = NULL;
 
     return 0;
 }

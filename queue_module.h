@@ -7,13 +7,6 @@
 #include "thread_ops.h"
 #include "config.h"
 
-typedef enum {
-    PROCESS_NO_ERROR  = 0,
-    PROCESS_SYNC_ERROR,
-    PROCESS_POP_ERROR,
-    PROCESS_PROC_ERROR,
-} process_error_t;
-
 typedef int (*queue_module_process_fn)(void *item, void *ctx);
 typedef int (*queue_module_done_fn)(void *item, void *ctx);
 typedef int (*queue_module_sync_fn)(void **items, int count, void *ctx);

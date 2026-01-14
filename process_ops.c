@@ -2,48 +2,74 @@
 #include "process_ops.h"
 #include "queue.h"
 
-static int p_sync(queue_t **in_qs,
-                 queue_t **recycle_qs,
-                 queue_ops_t *q_ops,
-                 int *qidxs,
-                 int qcount,
-                 void **items,
-                 int *out_qidxs,
-                 int *out_cnt,
-                 void *ctx) {
+#include "process_ops.h"
 
+/*
+ * 默认 pick：
+ *   - 所有非 NULL items 都进入 picked
+ */
+static pick_result_t default_pick(
+        void **items,
+        int item_cnt,
+        int *picked_idxs,
+        int *picked_cnt,
+        int *drop_idxs,
+        int *drop_cnt,
+        int *requeue_idxs,
+        int *requeue_cnt,
+        void *ctx)
+{
+    (void)ctx;
 
-    *out_cnt = qcount;
-    *out_qidxs = *qidxs;
+    *picked_cnt  = 0;
+    *drop_cnt    = 0;
+    *requeue_cnt = 0;
 
-    int n = qcount;
-
-    for (int i = 0; i < n; ++i) {
-        int qi = qidxs[i];
-        items[i] = q_ops->pop(in_qs[qi]);
-        out_qidxs[i] = qi;
+    for (int i = 0; i < item_cnt; ++i) {
+        if (items[i])
+            picked_idxs[(*picked_cnt)++] = i;
     }
 
-LOG("%s:%d qcount:%d, qid:%d", __func__, __LINE__, qcount, qidxs[0]);
+    if (*picked_cnt == 0)
+        return PICK_SKIP;
+
+    return PICK_OK;
+}
+
+/*
+ * 默认 process：
+ *   - 永远成功
+ */
+static int default_process(
+        void **items,
+        int *picked_idxs,
+        int picked_cnt,
+        void *ctx)
+{
+    (void)items;
+    (void)picked_idxs;
+    (void)picked_cnt;
+    (void)ctx;
     return 0;
 }
 
-static int p_process(void **items, int count, void *ctx) {
-
-LOG("%s:%d, count=%d", __func__, __LINE__, count);
-    return 0;
-
+static void default_done(void *ctx, int error_code)
+{
+    (void)ctx;
+    (void)error_code;
 }
 
-static void p_done(void *ctx, int error) {
-
-LOG("%s:%d, error code=%d", __func__, __LINE__, error);
+static void default_pop_timeout_ns(void *ctx, uint64_t *timeout)
+{
+    (void) ctx;
+    *timeout = 10 * 1000 * 1000;
 }
 
+/* 对外导出的默认 ops */
 const process_ops_t default_process_ops = {
-//    .sync = p_sync,
-    .sync = NULL,
-    .process = p_process,
-    .done = p_done,
+    .pick    = default_pick,
+    .process = default_process,
+    .done    = default_done,
+    .pop_timeout_ns = default_pop_timeout_ns,
 };
 

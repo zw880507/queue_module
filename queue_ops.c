@@ -7,6 +7,7 @@ static int q_init(queue_t *q, const char *name, int capacity, const struct item_
 
 static void q_deinit(queue_t *q) { queue_deinit(q); }
 static int q_push(queue_t *q, void *item) { return queue_push(q, item); }
+static int q_push_front(queue_t *q, void *item) { return queue_push_front(q, item); }
 static void *q_pop(queue_t *q) { return queue_pop(q); }
 static int q_try_pop(queue_t *q, void **out) { return queue_try_pop(q, out); }
 static void *q_alloc_item(queue_t *q) { return queue_alloc_item(q); }
@@ -24,6 +25,7 @@ const queue_ops_t default_queue_ops = {
     .init = q_init,
     .deinit = q_deinit,
     .push = q_push,
+    .push_front = q_push_front,
     .pop = q_pop,
     .try_pop = q_try_pop,
     .alloc_item = q_alloc_item,

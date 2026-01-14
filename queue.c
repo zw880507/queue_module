@@ -137,6 +137,62 @@ void *queue_pop(queue_t *q)
     return item;
 }
 
+int queue_push_front(queue_t *q, void *item)
+{
+    if (!q || !item)
+        return -1;
+
+    pthread_mutex_lock(&q->lock);
+
+    /* full 进入监控 */
+    if (q->count == q->capacity && q->full_enter_ts == 0) {
+        q->full_enter_ts = now_ns();
+        if (q->monitor)
+            q->monitor(q->monitor_ctx, q,
+                       QUEUE_EVENT_FULL_ENTER, 0);
+    }
+
+    /* 等待有空间 */
+    while (q->count == q->capacity && !q->stopped)
+        pthread_cond_wait(&q->not_full, &q->lock);
+
+    /* full 离开监控 */
+    if (q->full_enter_ts > 0) {
+        uint64_t dt = now_ns() - q->full_enter_ts;
+        q->full_enter_ts = 0;
+        if (q->monitor)
+            q->monitor(q->monitor_ctx, q,
+                       QUEUE_EVENT_FULL_LEAVE, dt);
+    }
+
+    if (q->stopped) {
+        pthread_mutex_unlock(&q->lock);
+        return -1;
+    }
+
+    /* head 前移一格（注意取模） */
+    q->head = (q->head - 1 + q->capacity) % q->capacity;
+    q->ring[q->head] = item;
+    q->count++;
+
+    /* item track */
+    if (q->item_ops && q->item_ops->get_track) {
+        item_track_t *item_track =
+            q->item_ops->get_track(item, q->item_ops->ctx);
+        if (item_track)
+            item_track_on_push(item, q, item);
+    }
+
+    pthread_cond_signal(&q->not_empty);
+
+    if (q->notify_cb)
+        q->notify_cb(q->notify_ctx, q->notify_qidx);
+
+    pthread_mutex_unlock(&q->lock);
+    return 0;
+}
+
+
 int queue_try_pop(queue_t *q, void **out)
 {
     int ret = -1;

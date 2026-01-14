@@ -11,6 +11,8 @@ typedef struct queue_ops {
     void * (*pop)(queue_t *q);                    /* blocking pop */
     int   (*try_pop)(queue_t *q, void **out);     /* non-blocking pop */
 
+    int   (*push_front)(queue_t *q, void *item);        /* blocking push */
+
     void *(*alloc_item)(queue_t *q);             /* 申请 item */
     void  (*free_item)(queue_t *q, void *item);  /* 释放 item */
     void  (*recycle_item)(queue_t *q, void *item);
