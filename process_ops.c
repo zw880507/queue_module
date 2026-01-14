@@ -41,8 +41,8 @@ LOG("%s:%d, error code=%d", __func__, __LINE__, error);
 }
 
 const process_ops_t default_process_ops = {
-    .sync = p_sync,
-//    .sync = NULL,
+//    .sync = p_sync,
+    .sync = NULL,
     .process = p_process,
     .done = p_done,
 };

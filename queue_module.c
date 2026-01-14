@@ -1,20 +1,8 @@
-/* queue_module.c — 修改版 */
 #include "queue_module.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include "log.h"
-
-/* 找到当前线程在 m->threads 中的 index */
-static int queue_module_get_tid(queue_module_t *m)
-{
-    pthread_t self = pthread_self();
-    for (int i = 0; i < m->request_thread_count; ++i) {
-        if (pthread_equal(self, m->threads[i]))
-            return i;
-    }
-    return -1;
-}
 
 static void queue_module_run(queue_module_t *m,
                                   queue_thread_map_t *map)
@@ -44,34 +32,25 @@ static void queue_module_run(queue_module_t *m,
                                  m->ctx) != 0) {
 
             if (m->process_ops->done) {
-LOG("%s:%d", __func__, __LINE__);
                 m->process_ops->done(m->ctx, PROCESS_SYNC_ERROR);
             }
-LOG("%s:%d", __func__, __LINE__);
 
             return;
         } else if (item_cnt != n) {
-
-LOG("%s:%d", __func__, __LINE__);
             //TODO need recycle here ?
             for (int i = 0; i < item_cnt; ++i) {
                 m->queue_ops->recycle_item(m->recycle_qs[out_qidxs[i]], items[i]);
             }
 
-LOG("%s:%d", __func__, __LINE__);
             if (m->process_ops->done) {
-LOG("%s:%d", __func__, __LINE__);
                 m->process_ops->done(m->ctx, PROCESS_SYNC_ERROR);
             }
-LOG("%s:%d", __func__, __LINE__);
 
             return;
         } else {
-LOG("%s:%d, sync OK", __func__, __LINE__);
-
+            //sync OK
         }
     } else {
-LOG("%s:%d", __func__, __LINE__);
         for (int i = 0; i < n; ++i) {
             int qi = map->qidxs[i];
             items[i] = m->queue_ops->pop(m->in_qs[qi]);
@@ -85,44 +64,32 @@ LOG("%s:%d", __func__, __LINE__);
             out_qidxs[i] = qi;
         }
         item_cnt = n;
-LOG("%s:%d", __func__, __LINE__);
     }
 
     int handled = 0;
     if (m->process_ops->process) {
-LOG("%s:%d", __func__, __LINE__);
         handled = m->process_ops->process(items, item_cnt, m->ctx);
-LOG("%s:%d", __func__, __LINE__);
     }
 
     if (handled) {
-LOG("%s:%d", __func__, __LINE__);
         for (int i = 0; i < item_cnt; ++i) {
             m->queue_ops->recycle_item(m->recycle_qs[out_qidxs[i]], items[i]);
         }
 
-LOG("%s:%d", __func__, __LINE__);
         if (m->process_ops->done) {
-LOG("%s:%d", __func__, __LINE__);
             m->process_ops->done(m->ctx, PROCESS_PROC_ERROR);
-LOG("%s:%d", __func__, __LINE__);
         }
 
         return;
 
     } else {
-LOG("%s:%d", __func__, __LINE__);
         for (int i = 0; i < item_cnt; ++i) {
-LOG("%s:%d, out_qidxs i=%d", __func__, __LINE__, out_qidxs[i]);
             m->queue_ops->push(m->out_qs[out_qidxs[i]], items[i]);
         }
-LOG("%s:%d", __func__, __LINE__);
     }
 
     if (m->process_ops->done) {
-LOG("%s:%d", __func__, __LINE__);
         m->process_ops->done(m->ctx, PROCESS_NO_ERROR);
-LOG("%s:%d", __func__, __LINE__);
     }
 }
 
@@ -133,9 +100,9 @@ static void *queue_module_thread(void *arg)
     int tid = tctx->tid;
 
     queue_thread_map_t *map = &m->thread_maps[tid];
-    char tname[16];
-    snprintf(tname, sizeof(tname), "%s-%d",m->request_thread_name, tid);
-    pthread_setname_np(pthread_self(), tname);
+//    char tname[16];
+//    snprintf(tname, sizeof(tname), "%s-%d",m->request_thread_name, tid);
+//    pthread_setname_np(pthread_self(), tname);
 
     while (m->running) {
         queue_module_run(m, map);
@@ -144,9 +111,10 @@ static void *queue_module_thread(void *arg)
 }
 
 static int queue_module_balance(queue_module_t *m,
+                                int request_thread_count,
                                 int *real_thread_count)
 {
-    int T = m->request_thread_count;
+    int T = request_thread_count;
     int Q = m->inq_count;
 
     if (T <= 0 || Q <= 0)
@@ -156,7 +124,7 @@ static int queue_module_balance(queue_module_t *m,
     if (!m->thread_maps)
         return -1;
 
-    /* ========== SYNC 模式 ========== */
+    /* ========== SYNC Mode ========== */
     if (m->process_ops && m->process_ops->sync) {
 
         m->thread_maps[0].qcount = Q;
@@ -171,7 +139,7 @@ static int queue_module_balance(queue_module_t *m,
         return 0;
     }
 
-    /* ========== STREAM 模式 ========== */
+    /* ========== STREAM Mode ========== */
     int used_threads = (Q < T) ? Q : T;
     *real_thread_count = used_threads;
 
@@ -206,17 +174,15 @@ int queue_module_init(queue_module_t *m,
                       const item_ops_t *item_ops,
                       const queue_ops_t *queue_ops,
                       const process_ops_t *process_ops,
-                      int request_thread_count,
-                      int request_thread_priority,
-                      const char *request_thread_name,
+                      const thread_ops_t *thread_ops,
                       void *ctx)
 {
     if (!m || !queue_ops)
         return -1;
 
     memset(m, 0, sizeof(*m));
-    strncpy(m->name, name ? name : "", NAME_SIZE - 1);
-    m->name[NAME_SIZE - 1] = '\0';
+    strncpy(m->name, name ? name : "", sizeof(name) < QM_NAME_SIZE - 1 ? sizeof(name): QM_NAME_SIZE);
+    m->name[QM_NAME_SIZE - 1] = '\0';
 
     m->in_qs       = in_qs;
     m->inq_count   = inq_count;
@@ -228,34 +194,9 @@ int queue_module_init(queue_module_t *m,
     m->item_ops    = item_ops;
     m->queue_ops   = queue_ops;
     m->process_ops = process_ops;
+    m->thread_ops  = thread_ops;
     m->ctx         = ctx;
     m->running     = 1;
-
-    m->request_thread_count    = request_thread_count;
-    m->request_thread_priority = request_thread_priority;
-
-    if (request_thread_name) {
-        /* 直接拷贝固定长度，保证以 '\0' 结尾 */
-        strncpy(m->request_thread_name, request_thread_name, NAME_SIZE - 1);
-        m->request_thread_name[NAME_SIZE - 1] = '\0';
-    } else {
-        m->request_thread_name[0] = '\0';
-    }
-
-    if (m->request_thread_count <= 0)
-        m->request_thread_count = 1;
-
-    m->threads = calloc(m->request_thread_count, sizeof(pthread_t));
-    if (!m->threads)
-        return -1;
-
-    m->thread_ctxs = calloc(request_thread_count, sizeof(queue_thread_ctx_t));
-
-    if (!m->threads || !m->thread_ctxs) {
-        free(m->threads);
-        m->threads = NULL;
-        return -1;
-    }
 
     return 0;
 }
@@ -265,14 +206,59 @@ int queue_module_start(queue_module_t *m)
     if (!m)
         return -1;
 
-    int real_thread_count = 0;
-    if (queue_module_balance(m, &real_thread_count)) {
+    char request_thread_name[QM_THREAD_NAME_SIZE] = QM_DEFAULT_THREAD_NAME;
 
-    LOG("%s:%d, real_thread_count=%d", __func__, __LINE__, real_thread_count);
-        return -1;
+    if (m->thread_ops && m->thread_ops->get_thread_name) {
+        m->thread_ops->get_thread_name(&request_thread_name);
     }
 
-    LOG("%s:%d, real_thread_count=%d", __func__, __LINE__, real_thread_count);
+    char real_thread_name[QM_THREAD_NAME_SIZE + QM_NAME_SIZE];
+    size_t name_len = strlen(m->name);
+    size_t request_len = strlen(request_thread_name);
+
+    if (name_len >= sizeof(m->name)) name_len = sizeof(m->name) - 1;
+    if (request_len >= sizeof(request_thread_name)) request_len = sizeof(request_thread_name) - 1;
+
+    snprintf(real_thread_name, sizeof(real_thread_name), 
+         "%.*s-%.*s", 
+         (int)name_len, m->name, 
+         (int)request_len, request_thread_name);
+    LOG("%s:%d, request_thread_name:%s, m->name:%s, real_name:%s", __func__, __LINE__, request_thread_name, m->name, real_thread_name);
+
+    int request_thread_count = QM_DEFAULT_THREAD_COUNT;
+    if (m->thread_ops && m->thread_ops->get_thread_count) {
+        m->thread_ops->get_thread_count(&request_thread_count);
+    }
+
+    if (request_thread_count <= 0) {
+        request_thread_count = QM_DEFAULT_THREAD_COUNT;
+    }
+
+    int real_thread_count = 0;
+    queue_module_balance(m, request_thread_count, &real_thread_count);
+
+    if (real_thread_count <= 0) {
+        real_thread_count = QM_DEFAULT_THREAD_COUNT;
+    }
+
+    m->real_thread_count = real_thread_count;
+
+    int request_thread_priority = QM_DEFAULT_THREAD_PRIORITY;
+    if (m->thread_ops && m->thread_ops->get_thread_priority) {
+        m->thread_ops->get_thread_priority(&request_thread_priority);
+    }
+
+    m->threads = calloc(real_thread_count, sizeof(pthread_t));
+    if (!m->threads)
+        return -1;
+
+    m->thread_ctxs = calloc(real_thread_count, sizeof(queue_thread_ctx_t));
+
+    if (!m->threads || !m->thread_ctxs) {
+        free(m->threads);
+        m->threads = NULL;
+        return -1;
+    }
 
     for (int i = 0; i < real_thread_count; ++i) {
 
@@ -281,12 +267,11 @@ int queue_module_start(queue_module_t *m)
         pthread_attr_t attr;
         pthread_attr_init(&attr);
 
-        if (m->request_thread_priority > 0) {
-            struct sched_param param = {
-                .sched_priority = m->request_thread_priority
-            };
-            pthread_attr_setschedparam(&attr, &param);
-        }
+
+        struct sched_param param = {
+            .sched_priority = request_thread_priority
+        };
+        pthread_attr_setschedparam(&attr, &param);
 
         int ret = pthread_create(&m->threads[i],
                        &attr,
@@ -301,10 +286,10 @@ int queue_module_start(queue_module_t *m)
             return -1;
         }
 
-        char tname[NAME_SIZE];
+        char tname[QM_THREAD_NAME_SIZE +QM_NAME_SIZE];
         snprintf(tname, sizeof(tname), "%s-%d",
-                 m->request_thread_name[0] ?
-                    m->request_thread_name : m->name,
+                 real_thread_name[0] ?
+                    real_thread_name : m->name,
                  i);
         pthread_setname_np(m->threads[i], tname);
     }
@@ -323,12 +308,12 @@ int queue_module_stop(queue_module_t *m)
         m->queue_ops->wakeup(m->in_qs[i]);
 
     /* 等待所有线程退出 */
-    for (int i = 0; i < m->request_thread_count; ++i)
+    for (int i = 0; i < m->real_thread_count; ++i)
         pthread_join(m->threads[i], NULL);
 
     /* 清理 thread_maps 中分配的 qidxs */
     if (m->thread_maps) {
-        for (int i = 0; i < m->request_thread_count; ++i)
+        for (int i = 0; i < m->real_thread_count; ++i)
             free(m->thread_maps[i].qidxs);
         free(m->thread_maps);
         m->thread_maps = NULL;

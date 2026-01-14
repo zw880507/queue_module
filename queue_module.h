@@ -4,8 +4,8 @@
 #include "item_ops.h"
 #include "queue_ops.h"
 #include "process_ops.h"
-
-#define NAME_SIZE 15
+#include "thread_ops.h"
+#include "config.h"
 
 typedef enum {
     PROCESS_NO_ERROR  = 0,
@@ -31,7 +31,7 @@ typedef struct queue_thread_ctx {
 
 typedef struct queue_module {
     int       id;
-    char      name[NAME_SIZE];
+    char      name[QM_NAME_SIZE];
     queue_t   **in_qs;
     queue_t   **out_qs;
     queue_t   **recycle_qs;
@@ -39,9 +39,6 @@ typedef struct queue_module {
     int       outq_count;
     int       rcyq_count;
 
-    int       request_thread_count;
-    int       request_thread_priority;
-    char      request_thread_name[NAME_SIZE];
     pthread_t *threads;
     queue_thread_ctx_t *thread_ctxs;
     queue_thread_map_t *thread_maps;
@@ -51,6 +48,9 @@ typedef struct queue_module {
     const item_ops_t     *item_ops;
     const queue_ops_t    *queue_ops;
     const process_ops_t  *process_ops;
+    const thread_ops_t   *thread_ops;
+
+    int real_thread_count;
 
     int       running;
 
@@ -64,9 +64,7 @@ int queue_module_init(queue_module_t *m,
                       const item_ops_t *item_ops,
                       const queue_ops_t *queue_ops,
                       const process_ops_t *process_ops,
-                      int request_thread_count,
-                      int request_thread_priority,
-                      const char* request_thread_name,
+                      const thread_ops_t *thread_ops,
                       void *ctx);
 
 int queue_module_start(queue_module_t *m);
