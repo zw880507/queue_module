@@ -7,10 +7,8 @@ void item_track_on_pop(item_track_t *t, struct queue *q, void* item)
     if (!t) return;
     t->last_pop_ts = now_ns();
 
-    LOG("[TRACK] item id=%d, item=%p queue=%s , queue id:%d, pop",
-          t->id,
-          item,
-          q->name, q->id);
+    LOG("[TRACK] item id=%" PRIu64 ", item=%p queue=%s , queue id=%d, pop",
+            t->id, item, q->name, q->id);
 }
 
 void item_track_on_push(item_track_t *t, struct queue *q, void *item)

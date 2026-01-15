@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <time.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include "utils.h"
 
@@ -23,7 +24,7 @@
         ##__VA_ARGS__);                                         \
 } while (0)
 
-#define LOG(fmt, ...) do {                                     \
+#define LOG2(fmt, ...) do {                                     \
     struct timespec _ts;                                       \
     char _tname[16] = {0};                                     \
     clock_gettime(CLOCK_REALTIME, &_ts);                        \
@@ -34,3 +35,15 @@
         ##__VA_ARGS__);                                         \
 } while (0)
 
+
+#define LOG(fmt, ...) do {                                              \
+    struct timespec _ts;                                                \
+    char _tname[16] = {0};                                              \
+    clock_gettime(CLOCK_REALTIME, &_ts);                                 \
+    pthread_getname_np(pthread_self(), _tname, sizeof(_tname));          \
+    printf("[%" PRIu64 ".%03" PRIu64 "][%s] " fmt "\n",                  \
+           (uint64_t)_ts.tv_sec,                                         \
+           (uint64_t)(_ts.tv_nsec / 1000000),                            \
+           _tname[0] ? _tname : "noname",                                \
+           ##__VA_ARGS__);                                               \
+} while (0)

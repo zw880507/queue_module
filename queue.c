@@ -126,7 +126,6 @@ void *queue_pop(queue_t *q)
 
 
     if (q->item_ops && q->item_ops->get_track) {
-        item_track_t *item_track1 = q->item_ops->get_track(NULL, NULL);
         item_track_t *item_track = q->item_ops->get_track(item, q->item_ops->ctx);
         if (item_track)
             item_track_on_pop(item, q, item);
@@ -236,7 +235,7 @@ void *queue_alloc_item(queue_t *q)
     pthread_mutex_unlock(&q->lock);
 
     /* 真正创建 item */
-    item = q->item_ops->alloc(q->item_ops->ctx, 1);
+    item = q->item_ops->alloc(1, q->item_ops->ctx);
     if (!item) {
         /* 回滚 count */
         pthread_mutex_lock(&q->lock);

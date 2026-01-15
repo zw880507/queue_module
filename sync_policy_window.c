@@ -39,7 +39,7 @@ int sync_policy_window_decide(
 
 //    if (diff <= m->tolerance_ns)
 //    if (diff <= m->TOLERANCE_NS)
-    if (diff <= tolerance_ns)
+    if (diff <= (uint64_t)tolerance_ns)
         return 0;           /* OK */
 
     if (out_drop_idx)

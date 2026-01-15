@@ -41,7 +41,10 @@ typedef struct queue_module {
     const item_ops_t     *item_ops;
     const queue_ops_t    *queue_ops;
     const process_ops_t  *process_ops;
-    const thread_ops_t   *thread_ops;
+
+    int thread_count;
+    int thread_priority;
+    char thread_name[QM_NAME_SIZE];
 
     int real_thread_count;
 
@@ -57,7 +60,9 @@ int queue_module_init(queue_module_t *m,
                       const item_ops_t *item_ops,
                       const queue_ops_t *queue_ops,
                       const process_ops_t *process_ops,
-                      const thread_ops_t *thread_ops,
+                      char *thread_name,
+                      int thread_count,
+                      int thread_priority,
                       void *ctx);
 
 int queue_module_start(queue_module_t *m);

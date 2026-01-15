@@ -72,6 +72,7 @@ void queue_deinit(queue_t *q);
 int   queue_push(queue_t *q, void *item);     /* blocking */
 int   queue_try_pop(queue_t *q, void **out);  /* non-blocking */
 void *queue_pop(queue_t *q);                  /* blocking */
+int queue_push_front(queue_t *q, void *item);
 
 /* control */
 void queue_wakeup(queue_t *q);

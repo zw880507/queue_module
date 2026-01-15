@@ -7,10 +7,10 @@
 int pop_multi_with_timeout(queue_module_t *m,
                            queue_thread_map_t *map,
                            uint64_t timeout_ns,
-                           void **items,            /* size = n */
-                           int *popped_midxs,       /* size = n */
+                           void **items,
+                           int *popped_midxs,
                            int *popped_cnt,
-                           int *missed_midxs,       /* size = n */
+                           int *missed_midxs,
                            int *missed_cnt)
 {
     int n = map->qcount;
@@ -34,17 +34,14 @@ int pop_multi_with_timeout(queue_module_t *m,
 
             int qi = map->qidxs[i];
             if (!m->queue_ops->try_pop(m->in_qs[qi], &items[i])) {
-//                items[i] = item;
                 got[i]   = 1;
                 popped_midxs[(*popped_cnt)++] = i;
             }
         }
 
-        /* 已经全部 pop 到 */
         if (*popped_cnt == n)
             break;
 
-        /* 防止 busy loop */
         struct timespec ts = {
             .tv_sec  = 0,
             .tv_nsec = 1000000, /* 1ms */
@@ -52,7 +49,6 @@ int pop_multi_with_timeout(queue_module_t *m,
         nanosleep(&ts, NULL);
     }
 
-    /* 统计 missed */
     for (int i = 0; i < n; ++i) {
         if (!got[i])
             missed_midxs[(*missed_cnt)++] = i;
@@ -94,8 +90,6 @@ static void queue_module_run(queue_module_t *m,
         return;
     }
 
-    /* -------- pick 阶段 -------- */
-
     int picked_midxs[n];
     int drop_midxs[n];
     int requeue_midxs[n];
@@ -109,6 +103,7 @@ static void queue_module_run(queue_module_t *m,
         pick_ret = m->process_ops->pick(
                         items,
                         n,
+                        m->item_ops,
                         picked_midxs,  &picked_cnt,
                         drop_midxs,    &drop_cnt,
                         requeue_midxs, &requeue_cnt,
@@ -131,7 +126,7 @@ static void queue_module_run(queue_module_t *m,
         items[midx] = NULL;
     }
 
-    /* -------- requeue (必须 front) -------- */
+    /* -------- requeue (push front) -------- */
     for (int i = 0; i < requeue_cnt; ++i) {
         int midx = requeue_midxs[i];
         if (!items[midx])
@@ -219,24 +214,6 @@ static int queue_module_balance(queue_module_t *m,
     if (!m->thread_maps)
         return -1;
 
-#if 0
-    /* ========== SYNC Mode ========== */
-    if (m->process_ops && m->process_ops->sync) {
-
-        m->thread_maps[0].qcount = Q;
-        m->thread_maps[0].qidxs  = calloc(Q, sizeof(int));
-        if (!m->thread_maps[0].qidxs)
-            return -1;
-
-        for (int i = 0; i < Q; ++i)
-            m->thread_maps[0].qidxs[i] = i;
-
-        *real_thread_count = 1;
-        return 0;
-    }
-#endif
-
-    /* ========== STREAM Mode ========== */
     int used_threads = (Q < T) ? Q : T;
     *real_thread_count = used_threads;
 
@@ -271,7 +248,9 @@ int queue_module_init(queue_module_t *m,
                       const item_ops_t *item_ops,
                       const queue_ops_t *queue_ops,
                       const process_ops_t *process_ops,
-                      const thread_ops_t *thread_ops,
+                      char *thread_name,
+                      int thread_count,
+                      int thread_priority,
                       void *ctx)
 {
     if (!m || !queue_ops)
@@ -291,9 +270,15 @@ int queue_module_init(queue_module_t *m,
     m->item_ops    = item_ops;
     m->queue_ops   = queue_ops;
     m->process_ops = process_ops;
-    m->thread_ops  = thread_ops;
     m->ctx         = ctx;
     m->running     = 1;
+
+    m->thread_count = thread_count;
+    m->thread_priority = thread_priority;
+
+    strncpy(m->thread_name, thread_name ? thread_name : "",
+            sizeof(thread_name) < QM_NAME_SIZE - 1 ? sizeof(thread_name): QM_NAME_SIZE);
+    m->thread_name[QM_NAME_SIZE - 1] = '\0';
 
     return 0;
 }
@@ -303,33 +288,19 @@ int queue_module_start(queue_module_t *m)
     if (!m)
         return -1;
 
-    char request_thread_name[QM_THREAD_NAME_SIZE] = QM_DEFAULT_THREAD_NAME;
-
-    if (m->thread_ops && m->thread_ops->get_thread_name) {
-        m->thread_ops->get_thread_name(&request_thread_name);
-    }
-
-    char real_thread_name[QM_THREAD_NAME_SIZE + QM_NAME_SIZE];
+    char thread_name[QM_THREAD_NAME_SIZE + QM_NAME_SIZE];
     size_t name_len = strlen(m->name);
-    size_t request_len = strlen(request_thread_name);
+    size_t thread_name_len = strlen(m->thread_name);
 
-    if (name_len >= sizeof(m->name)) name_len = sizeof(m->name) - 1;
-    if (request_len >= sizeof(request_thread_name)) request_len = sizeof(request_thread_name) - 1;
-
-    snprintf(real_thread_name, sizeof(real_thread_name), 
+    snprintf(thread_name, sizeof(thread_name), 
          "%.*s-%.*s", 
          (int)name_len, m->name, 
-         (int)request_len, request_thread_name);
-    LOG("%s:%d, request_thread_name:%s, m->name:%s, real_name:%s", __func__, __LINE__, request_thread_name, m->name, real_thread_name);
+         (int)thread_name_len, m->thread_name);
 
-    int request_thread_count = QM_DEFAULT_THREAD_COUNT;
-    if (m->thread_ops && m->thread_ops->get_thread_count) {
-        m->thread_ops->get_thread_count(&request_thread_count);
-    }
-
-    if (request_thread_count <= 0) {
+    int request_thread_count = m->thread_count;
+    if (request_thread_count) {
         request_thread_count = QM_DEFAULT_THREAD_COUNT;
-    }
+    } 
 
     int real_thread_count = 0;
     queue_module_balance(m, request_thread_count, &real_thread_count);
@@ -339,11 +310,6 @@ int queue_module_start(queue_module_t *m)
     }
 
     m->real_thread_count = real_thread_count;
-
-    int request_thread_priority = QM_DEFAULT_THREAD_PRIORITY;
-    if (m->thread_ops && m->thread_ops->get_thread_priority) {
-        m->thread_ops->get_thread_priority(&request_thread_priority);
-    }
 
     m->threads = calloc(real_thread_count, sizeof(pthread_t));
     if (!m->threads)
@@ -366,7 +332,7 @@ int queue_module_start(queue_module_t *m)
 
 
         struct sched_param param = {
-            .sched_priority = request_thread_priority
+            .sched_priority = m->thread_priority
         };
         pthread_attr_setschedparam(&attr, &param);
 
@@ -385,8 +351,8 @@ int queue_module_start(queue_module_t *m)
 
         char tname[QM_THREAD_NAME_SIZE +QM_NAME_SIZE];
         snprintf(tname, sizeof(tname), "%s-%d",
-                 real_thread_name[0] ?
-                    real_thread_name : m->name,
+                 thread_name[0] ?
+                    thread_name : m->name,
                  i);
         pthread_setname_np(m->threads[i], tname);
     }
@@ -415,7 +381,6 @@ int queue_module_stop(queue_module_t *m)
 
     free(m->threads);
     m->threads = NULL;
-
 
     return 0;
 }

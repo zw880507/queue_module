@@ -2,12 +2,13 @@
 #include <string.h>
 #include "tracked_item.h"
 #include "item_ops.h"
+#include "item_track_ops.h"
 #include "utils.h"
 
 /*
  * ctx 指向业务 item_ops
  */
-static void *item_track_alloc(void *ctx, int count)
+static void *item_track_alloc(int count, void *ctx)
 {
     item_ops_t *user_ops = ctx;
 
@@ -17,7 +18,7 @@ static void *item_track_alloc(void *ctx, int count)
 
     t->track.id = get_next_item_id();
 
-    t->user_item = user_ops->alloc(user_ops->ctx, count);
+    t->user_item = user_ops->alloc(count, user_ops->ctx);
     if (!t->user_item) {
         free(t);
         return NULL;
@@ -27,8 +28,9 @@ static void *item_track_alloc(void *ctx, int count)
     return t;
 }
 
-static item_track_t *item_track_get_track(void *item)
+static item_track_t *item_track_get_track(void *item, void* ctx)
 {
+    (void)ctx;
     tracked_item_t *tracked_item = item;
     return &(tracked_item->track);
 }
@@ -54,7 +56,7 @@ static uint64_t item_track_get_ts(void *item, void* ctx)
 }
 
 void item_track_ops_init(item_ops_t *out,
-                           item_ops_t *user_ops)
+                           const item_ops_t *user_ops)
 {
     memset(out, 0, sizeof(*out));
     out->alloc = item_track_alloc;

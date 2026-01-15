@@ -13,10 +13,11 @@
 #include "tracked_item.h"
 #include "queue_module.h"
 #include "thread_ops.h"
+#include "item_track_ops.h"
 
 /* ================= 配置 ================= */
 
-#define N           30
+#define N           10
 #define QUEUE_CAP   20
 
 #define QUEUE_COUNT 3
@@ -34,6 +35,8 @@ static void _queue_monitor(void *ctx,
                           queue_event_t ev,
                           uint64_t ns)
 {
+
+    (void) ctx;
     switch (ev) {
     case QUEUE_EVENT_FULL_LEAVE:
         if (ns > 1 * 1000 * 1000)
@@ -50,16 +53,6 @@ static void _queue_monitor(void *ctx,
 //        LOG("%s:%d, event:%d", __func__, __LINE__, ev);
         break;
     }
-}
-
-static void item_latency_cb(
-        void *ctx,
-        queue_t *q,
-        void *item,
-        uint64_t ns)
-{
-    LOG("[queue %s] item %p latency %lu us",
-        q->name, item, ns / 1000);
 }
 
 /* ================= main ================= */
@@ -125,32 +118,37 @@ int main(void)
     queue_module_t module1, module2, module3;
     queue_module_init(&module1 /* queue_module_t */,
                       "module1" /* name */,
-                      &empty_qs /* in queues */,
+                      empty_qs /* in queues */,
                       N /* in queues count */,
-                      &fill_qs /* out queues */,
+                      fill_qs /* out queues */,
                       N /* out queues count */,
-                      &empty_qs /* recycle queues */,
+                      empty_qs /* recycle queues */,
                       N /* recycle queue count */,
                       &tracked_item_ops /* item_ops */,
                       &default_queue_ops /* queue_ops */,
                       &default_process_ops /* process_ops */,
-                      &default_thread_ops /* process_ops */,
+                      "thread",
+                      N,
+                      0,
                       NULL /* ctx */);
 
     queue_module_start(&module1);
 
     queue_module_init(&module2 /* queue_module_t */,
                       "module2" /* name */,
-                      &fill_qs /* in queues */,
+                      fill_qs /* in queues */,
                       N /* in queues count */,
-                      &process_qs /* out queues */,
+                      process_qs /* out queues */,
                       N /* out queues count */,
-                      &empty_qs /* recycle queues */,
+                      empty_qs /* recycle queues */,
                       N /* recycle queue count */,
                       &tracked_item_ops /* item_ops */,
                       &default_queue_ops /* queue_ops */,
                       &default_process_ops /* process_ops */,
-                      &default_thread_ops /* thread_ops */,
+                      "thread",
+                      N,
+                      0,
+
                       NULL /* ctx */);
 
     queue_module_start(&module2);
@@ -158,49 +156,22 @@ int main(void)
 
     queue_module_init(&module3 /* queue_module_t */,
                       "module3" /* name */,
-                      &process_qs /* in queues */,
+                      process_qs /* in queues */,
                       N /* in queues count */,
-                      &empty_qs /* out queues */,
+                      empty_qs /* out queues */,
                       N /* out queues count */,
-                      &empty_qs /* recycle queues */,
+                      empty_qs /* recycle queues */,
                       N /* recycle queue count */,
                       &tracked_item_ops /* item_ops */,
                       &default_queue_ops /* queue_ops */,
                       &default_process_ops /* process_ops */,
-                      &default_thread_ops /* thread_ops */,
+                      "thread",
+                      N,
+                      0,
+
                       NULL /* ctx */);
 
     queue_module_start(&module3);
-
-
-while (1)
-    sleep(1);
-
-
-    /* ---------- sync ---------- */
-
-    queue_t sync_out_q;
-
-    queue_init(&sync_out_q,
-               "sync_out_queue",
-               QUEUE_CAP,
-               &buffer_item_ops);
-
-    queue_set_monitor(&sync_out_q, _queue_monitor, NULL);
-
-    sync_module_t sync;
-
-    sync_module_init(&sync,
-                     N,
-                     fill_qs,
-                     &sync_out_q,
-                     empty_qs,
-                     &sync_policy_window,
-                     &tracked_item_ops,
-                     &group_item_ops,
-                     10000000);
-
-    sync_module_start(&sync);
 
 
     while (1) {
@@ -209,7 +180,6 @@ while (1)
 
     /* ---------- cleanup ---------- */
 
-    sync_module_stop(&sync);
 
     return 0;
 }

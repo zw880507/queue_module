@@ -2,13 +2,13 @@
 #include "item_ops.h"
 #include "item_group.h"
 
-static uint64_t group_get_ts(void *item)
+static uint64_t group_get_ts(void *item, void* ctx)
 {
     item_group_t *g = item;
     return g->timestamp;
 }
 
-static void *group_alloc(void *ctx, int count) {
+static void *group_alloc(int count, void *ctx) {
     (void)ctx;
     item_group_t *group = calloc(1, sizeof(item_group_t));
     group->count = count;

@@ -2,8 +2,9 @@
 #include <stdint.h>
 #include "queue.h"
 
+struct queue;
 typedef struct item_track {
-    uint64_t id;
+    int id;
     uint64_t last_pop_ts;
 } item_track_t;
 

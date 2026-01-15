@@ -69,6 +69,7 @@ typedef struct process_ops {
     pick_result_t (*pick)(
         void   **items,
         int      item_cnt,
+        const item_ops_t *item_ops,
         int     *picked_idxs,
         int     *picked_cnt,
         int     *drop_idxs,

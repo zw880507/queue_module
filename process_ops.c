@@ -1,8 +1,6 @@
-#pragma once
 #include "process_ops.h"
 #include "queue.h"
-
-#include "process_ops.h"
+#include "log.h"
 
 /*
  * 默认 pick：
@@ -11,6 +9,7 @@
 static pick_result_t default_pick(
         void **items,
         int item_cnt,
+        const item_ops_t *item_ops,
         int *picked_idxs,
         int *picked_cnt,
         int *drop_idxs,
@@ -20,6 +19,10 @@ static pick_result_t default_pick(
         void *ctx)
 {
     (void)ctx;
+    (void)drop_idxs;
+    (void)requeue_idxs;
+    (void)requeue_cnt;
+//    (void)item_ops;
 
     *picked_cnt  = 0;
     *drop_cnt    = 0;
@@ -33,6 +36,10 @@ static pick_result_t default_pick(
     if (*picked_cnt == 0)
         return PICK_SKIP;
 
+
+for (int i = 0; i < item_cnt; ++i) {
+LOG("%s:%d, item:%p, timestamp:%ld", __func__, __LINE__, items[i], item_ops->get_timestamp_ns(items[i], item_ops->ctx));
+}
     return PICK_OK;
 }
 
@@ -40,7 +47,7 @@ static pick_result_t default_pick(
  * 默认 process：
  *   - 永远成功
  */
-static int default_process(
+static process_result_t default_process(
         void **items,
         int *picked_idxs,
         int picked_cnt,
@@ -50,6 +57,7 @@ static int default_process(
     (void)picked_idxs;
     (void)picked_cnt;
     (void)ctx;
+LOG("%s:%d", __func__, __LINE__);
     return 0;
 }
 
@@ -57,6 +65,7 @@ static void default_done(void *ctx, int error_code)
 {
     (void)ctx;
     (void)error_code;
+LOG("%s:%d", __func__, __LINE__);
 }
 
 static void default_pop_timeout_ns(void *ctx, uint64_t *timeout)

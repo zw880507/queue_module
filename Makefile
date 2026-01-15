@@ -3,17 +3,13 @@ CC     ?= gcc
 
 SRCS := \
 	buffer_item_ops.c \
-	group_item_ops.c \
 	main.c \
 	queue.c \
-	sync_module.c \
-	sync_policy_window.c \
         item_track_ops.c \
         item_track.c \
         queue_module.c \
         queue_ops.c \
-        process_ops.c \
-        thread_ops.c
+        process_ops.c
 
 OBJS := $(SRCS:.c=.o)
 
